@@ -1,50 +1,136 @@
-# Fenmo Expense Tracker (Enterprise-style)
+# Fenmo Expense Tracker
 
-Minimal full-stack expense tracker built from the assignment brief, with production-style structure and reliability behaviors.
+Minimal full-stack Expense Tracker built for the assignment.  
+The project focuses on correctness under real-world conditions (retries, refreshes, slow/failing requests), clean structure, and maintainability.
 
-## Stack
+## What Was Implemented (Assignment Coverage)
 
-- Frontend: React + TypeScript + Redux Toolkit + Vite + Tailwind CSS + Material UI + React Toastify + Framer Motion
-- Backend: Node.js + Express (MVC) + SQLite + Zod validation + Swagger docs
+### Required - Backend
 
-## Project Structure
+- `POST /api/expenses` to create an expense with `amount`, `category`, `description`, `date`
+- `GET /api/expenses` to list expenses
+- Optional query support:
+  - `category` for filtering
+  - `sort=date_desc` for newest-first sorting
+- Durable persistence using SQLite
+- Data model includes:
+  - `id`
+  - `amount` (stored as integer paise for money correctness)
+  - `category`
+  - `description`
+  - `date`
+  - `created_at`
 
-- `frontend/` React application
-- `backend/` Express API in MVC layout
-  - `src/server.js` server bootstrap
-  - `src/app.js` app composition
-  - `src/routes` route layer
-  - `src/controllers` controller layer
-  - `src/services` business logic layer
-  - `src/models` data access layer
-  - `src/middleware` middleware layer
-  - `src/validators` validation schemas
-  - `src/docs` Swagger setup
+### Required - Frontend
 
-## Features Covered
-
-- Create expense: amount, category, description, date
-- List expenses
+- Expense form to submit `amount`, `category`, `description`, `date`
+- Expense table/list of existing expenses
 - Filter by category
-- Sort by date (newest first)
-- Visible-list total amount
-- Loading/error UX states
-- Category-wise summary view
-- Retry-safe create flow via idempotency key support
-- Dark/light theme toggle
-- Responsive layout
-- UI transitions with Framer Motion
+- Sort by newest date
+- Total for currently visible list
 
-## API
+### Nice-to-Have Implemented
 
-- `POST /api/expenses`
-- `GET /api/expenses?category=...&sort=date_desc`
-- Health: `GET /health`
-- Swagger UI: `GET /api/docs`
+- Validation (backend Zod validation, invalid request handling)
+- Category summary view in UI
+- Basic automated tests (`backend/tests/expenses.test.js`)
+- Loading and error UX states
+- Retry-safe behavior via idempotent create flow
 
-## Run Locally
+## Architecture and Tech Stack
 
-Install all dependencies:
+- Frontend: React, TypeScript, Redux Toolkit, Vite, Tailwind CSS, Material UI, React Toastify, Framer Motion
+- Backend: Node.js, Express, SQLite, Zod, Swagger
+- Structure:
+  - `frontend/` - React app
+  - `backend/` - Express app (routes/controllers/services/models/middleware)
+
+## API Documentation (Swagger)
+
+- Swagger UI URL: [http://localhost:4000/api/docs](http://localhost:4000/api/docs)
+- Health check: [http://localhost:4000/health](http://localhost:4000/health)
+
+Swagger is generated from route JSDoc annotations and available after backend startup.
+
+## API Reference
+
+### 1) Create Expense
+
+- Method: `POST`
+- URL: `/api/expenses`
+- Headers:
+  - `Content-Type: application/json`
+  - `Idempotency-Key: <unique-key>` (optional but recommended)
+
+Request body:
+
+```json
+{
+  "amount": "499.99",
+  "category": "Groceries",
+  "description": "Weekly household purchase",
+  "date": "2026-04-22"
+}
+```
+
+Behavior:
+
+- `201` when newly created
+- `200` when same idempotency key + same payload is replayed
+- `409` if idempotency key is re-used with a different payload
+
+### 2) List Expenses
+
+- Method: `GET`
+- URL: `/api/expenses`
+- Query params:
+  - `category` (optional)
+  - `sort=date_desc` (optional)
+
+Example:
+
+- `/api/expenses`
+- `/api/expenses?category=Groceries`
+- `/api/expenses?sort=date_desc`
+- `/api/expenses?category=Groceries&sort=date_desc`
+
+Response includes:
+
+- `data`: array of expenses
+- `meta.total`: total amount of current visible list
+
+## Why These Design Decisions
+
+- SQLite was chosen for durable local persistence with minimal setup and production-like behavior compared to in-memory storage.
+- Money is stored as integer paise (`amount_paise`) to avoid floating-point precision issues.
+- Idempotency is implemented for create requests to make retries safe under unstable network conditions.
+- MVC + service layering improves maintainability and keeps concerns separated.
+- Zod validation keeps request contracts explicit and consistent.
+
+## Timebox Trade-offs
+
+- No auth/authz or user accounts
+- No background workers/caching/queues
+- Test scope kept focused on core API behavior
+- Single local environment setup (no containerization in this submission)
+
+## What Was Intentionally Not Done
+
+- CSV import/export
+- Advanced analytics dashboard
+- Multi-user support and role management
+- Cloud deployment pipeline (local-first submission)
+
+## How to Run
+
+## Prerequisites
+
+- Node.js 18+
+- npm 9+
+
+### 1) Install Dependencies
+
+From repository root:
 
 ```bash
 npm install
@@ -52,40 +138,59 @@ npm install --prefix backend
 npm install --prefix frontend
 ```
 
-Start both apps:
+### 2) Configure Environment (Backend)
+
+Copy or create backend env values:
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Default values:
+
+- `PORT=4000`
+- `CORS_ORIGIN=http://localhost:5173`
+
+### 3) Run Both Apps Together (Recommended)
+
+From root:
 
 ```bash
 npm run dev
 ```
 
-Run backend tests:
+This starts:
+
+- Backend: `http://localhost:4000`
+- Frontend: `http://localhost:5173`
+
+### 4) Run Backend and Frontend Separately
+
+Backend:
+
+```bash
+npm run dev --prefix backend
+```
+
+Frontend:
+
+```bash
+npm run dev --prefix frontend
+```
+
+### 5) Run Tests
+
+Backend tests:
 
 ```bash
 npm test --prefix backend
 ```
 
-Default URLs:
+## Quick Verification Checklist
 
-- Frontend: `http://localhost:5173`
-- Backend: `http://localhost:4000`
-- Swagger: `http://localhost:4000/api/docs`
-
-## Design Decisions
-
-- **Persistence choice**: SQLite for durable local persistence, no external infrastructure, and deterministic behavior.
-- **Money correctness**: backend stores money as `amount_paise` integer, then formats to 2-decimal strings for responses.
-- **Idempotency**: backend stores `Idempotency-Key` + request hash + expense mapping to safely handle retries and prevent duplicate writes.
-- **Validation**: request shape and constraints are enforced via Zod in middleware.
-- **Layering**: API uses MVC + service layer separation for long-term maintainability.
-
-## Trade-offs (Timebox)
-
-- No authentication/authorization implemented.
-- No background jobs, caching, or queue systems added.
-- Kept test scope small (core API integration coverage only) due to timebox.
-
-## Intentionally Not Done
-
-- CSV export/import
-- Advanced analytics dashboards
-- Multi-user account model
+- Open frontend: [http://localhost:5173](http://localhost:5173)
+- Create an expense from the form
+- Confirm row appears in expense table
+- Apply category filter and date sort
+- Confirm "Total" updates for visible rows
+- Open Swagger and test APIs: [http://localhost:4000/api/docs](http://localhost:4000/api/docs)

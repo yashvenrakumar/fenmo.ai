@@ -4,7 +4,6 @@ Minimal full-stack Expense Tracker built for the assignment.
 The project focuses on correctness under real-world conditions (retries, refreshes, slow/failing requests), clean structure, and maintainability.
 
 ## What Was Implemented (Assignment Coverage)
-
 ### Required - Backend
 
 - `POST /api/expenses` to create an expense with `amount`, `category`, `description`, `date`
@@ -49,8 +48,138 @@ The project focuses on correctness under real-world conditions (retries, refresh
 
 - Swagger UI URL: [http://localhost:4000/api/docs](http://localhost:4000/api/docs)
 - Health check: [http://localhost:4000/health](http://localhost:4000/health)
+- Production Swagger URL: [https://ec2-13-200-246-7.ap-south-1.compute.amazonaws.com/api/docs](https://ec2-13-200-246-7.ap-south-1.compute.amazonaws.com/api/docs)
+- Production health URL: [https://ec2-13-200-246-7.ap-south-1.compute.amazonaws.com/health](https://ec2-13-200-246-7.ap-south-1.compute.amazonaws.com/health)
 
 Swagger is generated from route JSDoc annotations and available after backend startup.
+
+## Deployed URLs (EC2)
+
+- Frontend (HTTPS): [https://ec2-13-200-246-7.ap-south-1.compute.amazonaws.com](https://ec2-13-200-246-7.ap-south-1.compute.amazonaws.com)
+- Backend base (HTTPS via Nginx): [https://ec2-13-200-246-7.ap-south-1.compute.amazonaws.com/api](https://ec2-13-200-246-7.ap-south-1.compute.amazonaws.com/api)
+- Backend health (HTTPS): [https://ec2-13-200-246-7.ap-south-1.compute.amazonaws.com/health](https://ec2-13-200-246-7.ap-south-1.compute.amazonaws.com/health)
+- Swagger docs (HTTPS): [https://ec2-13-200-246-7.ap-south-1.compute.amazonaws.com/api/docs](https://ec2-13-200-246-7.ap-south-1.compute.amazonaws.com/api/docs)
+
+Deployment note:
+
+- HTTPS is enabled using a self-signed certificate because Let's Encrypt does not issue certificates for `*.compute.amazonaws.com` hostnames. Browsers will show a security warning unless you use a custom domain with a trusted CA certificate.
+
+## AWS EC2 Deployment Process (Backend + Frontend + Nginx)
+
+### 1) Launch and connect to EC2
+
+- Launch an Amazon Linux EC2 instance.
+- Ensure security group allows:
+  - `22` (SSH)
+  - `80` (HTTP)
+  - `443` (HTTPS)
+- Connect using the PEM key:
+
+```bash
+chmod 400 "fenmo.pem"
+ssh -i "fenmo.pem" ec2-user@ec2-13-200-246-7.ap-south-1.compute.amazonaws.com
+```
+
+### 2) Copy project to EC2
+
+From local machine:
+
+```bash
+rsync -az --delete --exclude '.git' --exclude 'node_modules' \
+  -e "ssh -i fenmo.pem" ./ ec2-user@ec2-13-200-246-7.ap-south-1.compute.amazonaws.com:~/fenmo/
+```
+
+### 3) Install runtime dependencies on EC2
+
+```bash
+sudo dnf install -y gcc-c++ make nginx certbot python3-certbot-nginx
+curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
+sudo dnf install -y nodejs
+sudo npm install -g pm2
+```
+
+### 4) Start backend with PM2
+
+```bash
+cd ~/fenmo/backend
+npm install
+cat > .env <<'EOF'
+PORT=4000
+CORS_ORIGIN=https://ec2-13-200-246-7.ap-south-1.compute.amazonaws.com
+EOF
+pm2 start src/server.js --name fenmo-backend
+pm2 save
+```
+
+### 5) Build frontend for production
+
+```bash
+cd ~/fenmo/frontend
+npm install
+cat > .env <<'EOF'
+VITE_API_BASE_URL=https://ec2-13-200-246-7.ap-south-1.compute.amazonaws.com/api
+EOF
+npm run build
+sudo mkdir -p /var/www/fenmo
+sudo rsync -a --delete ~/fenmo/frontend/dist/ /var/www/fenmo/
+sudo chown -R nginx:nginx /var/www/fenmo
+```
+
+### 6) Configure Nginx
+
+Create `/etc/nginx/conf.d/fenmo.conf`:
+
+```nginx
+server {
+    listen 80;
+    server_name ec2-13-200-246-7.ap-south-1.compute.amazonaws.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ec2-13-200-246-7.ap-south-1.compute.amazonaws.com;
+
+    ssl_certificate /etc/nginx/ssl/fenmo-selfsigned.crt;
+    ssl_certificate_key /etc/nginx/ssl/fenmo-selfsigned.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    root /var/www/fenmo;
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:4000/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /health {
+        proxy_pass http://127.0.0.1:4000/health;
+    }
+
+    location / {
+        try_files $uri /index.html;
+    }
+}
+```
+
+Then enable/restart Nginx:
+
+```bash
+sudo nginx -t
+sudo systemctl enable nginx
+sudo systemctl restart nginx
+```
+
+### 7) SSL certificate note
+
+- Current deployment uses a self-signed certificate for HTTPS on the EC2 public DNS.
+- Browser warning ("Not secure") is expected with self-signed certs.
+- For a trusted certificate (green lock), map a custom domain to this EC2 instance and issue a Let's Encrypt certificate with Certbot.
 
 ## API Reference
 
